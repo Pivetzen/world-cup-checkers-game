@@ -268,7 +268,6 @@
             { name: "Sérvia", code: "rs" }, { name: "Polônia", code: "pl" }, { name: "Ucrânia", code: "ua" }
         ];
 
-        // Definições lógicas: 0 = vazio, 1 = Jogador, 2 = CPU, 3 = Dama Jogador, 4 = Dama CPU
         let boardState = [];
         let playerFlag = "";
         let cpuFlag = "";
@@ -285,29 +284,30 @@
         const turnDisplay = document.getElementById('turn-display');
         const scoreDisplay = document.getElementById('score-display');
 
-        // Preenche seletores na inicialização
         function populateSelects() {
+            playerSelect.innerHTML = "";
+            cpuSelect.innerHTML = "";
             countriesData.forEach((c, idx) => {
                 let opt1 = new Option(c.name, c.code);
                 let opt2 = new Option(c.name, c.code);
-                if(idx === 4) opt1.selected = true; // Brasil padrão jogador
-                if(idx === 5) opt2.selected = true; // França padrão CPU
+                if(idx === 4) opt1.selected = true; 
+                if(idx === 3) opt2.selected = true; 
                 playerSelect.add(opt1);
                 cpuSelect.add(opt2);
             });
         }
 
-        // Configuração inicial da matriz de estado do tabuleiro (8x8)
         function setupBoardState() {
             boardState = Array(8).fill(null).map(() => Array(8).fill(0));
-            // Peças da CPU (Linhas superiores de 0 a 2)
+            
+            // Peças da CPU (Linhas 0, 1 e 2)
             for (let r = 0; r < 3; r++) {
                 for (let c = 0; c < 8; c++) {
                     if ((r + c) % 2 === 1) boardState[r][c] = 2;
                 }
             }
-            // Peças do Jogador (Linhas inferiores de 5 a 7)
-            for (let r = 5; r < 7; r++) {
+            // Peças do Jogador (Linhas 5, 6 e 7 - CORRIGIDO para preencher o tabuleiro completamente)
+            for (let r = 5; r < 8; r++) {
                 for (let c = 0; c < 8; c++) {
                     if ((r + c) % 2 === 1) boardState[r][c] = 1;
                 }
@@ -345,7 +345,6 @@
                         square.appendChild(piece);
                     }
 
-                    // Destaca seleção atual e movimentos possíveis
                     if (selectedPiece && selectedPiece.row === r && selectedPiece.col === c) {
                         square.classList.add('selected-square');
                     }
@@ -365,6 +364,22 @@
             if (!playerTurn) return;
             selectedPiece = { row: r, col: c };
             validMoves = getMovesForPiece(r, c);
+            
+            // Força captura se houver outra peça em condição de captura obrigatória geral
+            let globalCaptures = [];
+            for (let row = 0; row < 8; row++) {
+                for (let col = 0; col < 8; col++) {
+                    if (boardState[row][col] === 1 || boardState[row][col] === 3) {
+                        let pm = getMovesForPiece(row, col).filter(m => m.capture !== null);
+                        globalCaptures.push(...pm);
+                    }
+                }
+            }
+
+            if (globalCaptures.length > 0) {
+                validMoves = validMoves.filter(m => m.capture !== null);
+            }
+
             drawBoard();
         }
 
@@ -373,7 +388,6 @@
             let type = boardState[r][c];
             if (type === 0) return moves;
 
-            // Direções de movimento simples: Jogador sobe (-1), CPU desce (+1), Damas usam ambas
             let rowDirs = [];
             if (type === 1) rowDirs = [-1];
             if (type === 2) rowDirs = [1];
@@ -381,7 +395,6 @@
 
             let colDirs = [-1, 1];
 
-            // Varre direções em busca de movimentos simples ou capturas
             rowDirs.forEach(dr => {
                 colDirs.forEach(dc => {
                     let nextR = r + dr;
@@ -390,7 +403,6 @@
                         if (boardState[nextR][nextC] === 0) {
                             moves.push({ fromR: r, fromC: c, toR: nextR, toC: nextC, capture: null });
                         } else {
-                            // Verifica possibilidade de pulo/captura
                             let isEnemy = (type === 1 || type === 3) ? [2,4] : [1,3];
                             if (isEnemy.includes(boardState[nextR][nextC])) {
                                 let jumpR = nextR + dr;
@@ -404,7 +416,6 @@
                 });
             });
 
-            // Prioriza capturas obrigatórias se existirem
             let captures = moves.filter(m => m.capture !== null);
             return captures.length > 0 ? captures : moves;
         }
@@ -412,7 +423,6 @@
         function executeMove(move) {
             let type = boardState[move.fromR][move.fromC];
             
-            // Promoção para Dama
             if (type === 1 && move.toR === 0) type = 3;
             if (type === 2 && move.toR === 7) type = 4;
 
@@ -421,7 +431,7 @@
 
             if (move.capture) {
                 let capType = boardState[move.capture.r][move.capture.c];
-                if (capType === 1 || type === 3) pCount--; else cpuCount--;
+                if (capType === 1 || capType === 3) pCount--; else cpuCount--;
                 boardState[move.capture.r][move.capture.c] = 0;
             }
 
@@ -435,6 +445,24 @@
 
             if (!playerTurn) {
                 setTimeout(cpuPlay, 800);
+            } else {
+                // Checa travamentos do jogador humano para validar empates
+                checkPlayerTurnMoves();
+            }
+        }
+
+        function checkPlayerTurnMoves() {
+            let totalPlayerMoves = [];
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    if (boardState[r][c] === 1 || boardState[r][c] === 3) {
+                        totalPlayerMoves.push(...getMovesForPiece(r, c));
+                    }
+                }
+            }
+            if (totalPlayerMoves.length === 0 && pCount > 0) {
+                alert("Jogo Encerrado! Você não tem movimentos válidos disponíveis. EMPATE!");
+                resetToMenu();
             }
         }
 
@@ -448,17 +476,46 @@
                 }
             }
 
-            if (allMoves.length === 0) {
-                alert("Você venceu! O adversário não possui mais movimentos válidos.");
+            // Condição de Empate se a CPU estiver com peças vivas mas sem movimentação disponível
+            if (allMoves.length === 0 && cpuCount > 0) {
+                alert("Jogo Encerrado! O adversário não possui movimentos válidos. EMPATE!");
                 resetToMenu();
                 return;
             }
 
-            // Prioridade total para pulos/capturas da IA
-            let captures = allMoves.filter(m => m.capture !== null);
-            let chosenMove = captures.length > 0 
-                ? captures[Math.floor(Math.random() * captures.length)] 
-                : allMoves[Math.floor(Math.random() * allMoves.length)];
+            // SISTEMA HEURÍSTICO DE PESOS PARA IA INTELIGENTE
+            allMoves.forEach(move => {
+                let score = 0;
+                let isKing = boardState[move.fromR][move.fromC] === 4;
+
+                if (move.capture !== null) {
+                    score += 100;
+                    if (boardState[move.capture.r][move.capture.c] === 3) score += 30;
+                }
+
+                if (!isKing && move.toR === 7) score += 50;
+                if (move.toC === 0 || move.toC === 7) score += 10;
+
+                let checkRows = [move.toR + 1];
+                if (isKing) checkRows.push(move.toR - 1);
+
+                checkRows.forEach(nextR => {
+                    if (nextR >= 0 && nextR < 8) {
+                        [-1, 1].forEach(dc => {
+                            let enemyC = move.toC + dc;
+                            if (enemyC >= 0 && enemyC < 8 && [1, 3].includes(boardState[nextR][enemyC])) {
+                                score -= 45; 
+                            }
+                        });
+                    }
+                });
+                move.score = score;
+            });
+
+            allMoves.sort((a, b) => b.score - a.score);
+            let bestScore = allMoves[0].score;
+            let topMoves = allMoves.filter(m => m.score === bestScore);
+            let chosenMove = topMoves[Math.floor(Math.random() * topMoves.length)];
 
             executeMove(chosenMove);
         }
@@ -490,7 +547,6 @@
         });
 
         document.getElementById('btn-reset').addEventListener('click', resetToMenu);
-
         document.addEventListener('DOMContentLoaded', populateSelects);
     </script>
 </body>
