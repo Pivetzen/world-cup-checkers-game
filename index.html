@@ -274,6 +274,7 @@
         let selectedPiece = null;
         let validMoves = [];
         let playerTurn = true;
+        let isMultiCaptureChain = false; // Controla se estamos no meio de um combo de capturas
         let pCount = 12, cpuCount = 12;
 
         const setupScreen = document.getElementById('setup-screen');
@@ -300,13 +301,11 @@
         function setupBoardState() {
             boardState = Array(8).fill(null).map(() => Array(8).fill(0));
             
-            // Peças da CPU (Linhas 0, 1 e 2)
             for (let r = 0; r < 3; r++) {
                 for (let c = 0; c < 8; c++) {
                     if ((r + c) % 2 === 1) boardState[r][c] = 2;
                 }
             }
-            // Peças do Jogador (Linhas 5, 6 e 7 - CORRIGIDO para preencher o tabuleiro completamente)
             for (let r = 5; r < 8; r++) {
                 for (let c = 0; c < 8; c++) {
                     if ((r + c) % 2 === 1) boardState[r][c] = 1;
@@ -314,6 +313,7 @@
             }
             pCount = 12; cpuCount = 12;
             playerTurn = true;
+            isMultiCaptureChain = false;
         }
 
         function drawBoard() {
@@ -336,7 +336,13 @@
                         if (type === 1 || type === 3) {
                             piece.classList.add('player-piece');
                             piece.style.backgroundImage = `url('https://flagcdn.com/w80/${playerFlag}.png')`;
-                            if(playerTurn) piece.addEventListener('click', (e) => { e.stopPropagation(); selectPiece(r, c); });
+                            // Se estiver no meio de um combo, bloqueia clicar em outras peças
+                            if(playerTurn && !isMultiCaptureChain) {
+                                piece.addEventListener('click', (e) => { e.stopPropagation(); selectPiece(r, c); });
+                            } else if (playerTurn && isMultiCaptureChain && selectedPiece && selectedPiece.row === r && selectedPiece.col === c) {
+                                // Permite re-selecionar a mesma peça do combo para ver os movimentos
+                                piece.addEventListener('click', (e) => { e.stopPropagation(); selectPiece(r, c); });
+                            }
                         } else {
                             piece.classList.add('cpu-piece');
                             piece.style.backgroundImage = `url('https://flagcdn.com/w80/${cpuFlag}.png')`;
@@ -362,21 +368,29 @@
 
         function selectPiece(r, c) {
             if (!playerTurn) return;
+            
+            // Se já estiver no meio de uma sequência de capturas, não deixa escolher outra peça
+            if (isMultiCaptureChain && (selectedPiece.row !== r || selectedPiece.col !== c)) return;
+
             selectedPiece = { row: r, col: c };
             validMoves = getMovesForPiece(r, c);
             
-            // Força captura se houver outra peça em condição de captura obrigatória geral
-            let globalCaptures = [];
-            for (let row = 0; row < 8; row++) {
-                for (let col = 0; col < 8; col++) {
-                    if (boardState[row][col] === 1 || boardState[row][col] === 3) {
-                        let pm = getMovesForPiece(row, col).filter(m => m.capture !== null);
-                        globalCaptures.push(...pm);
+            // Regra da captura obrigatória geral
+            if (!isMultiCaptureChain) {
+                let globalCaptures = [];
+                for (let row = 0; row < 8; row++) {
+                    for (let col = 0; col < 8; col++) {
+                        if (boardState[row][col] === 1 || boardState[row][col] === 3) {
+                            let pm = getMovesForPiece(row, col).filter(m => m.capture !== null);
+                            globalCaptures.push(...pm);
+                        }
                     }
                 }
-            }
-
-            if (globalCaptures.length > 0) {
+                if (globalCaptures.length > 0) {
+                    validMoves = validMoves.filter(m => m.capture !== null);
+                }
+            } else {
+                // Se for sequência, apenas movimentos de captura importam
                 validMoves = validMoves.filter(m => m.capture !== null);
             }
 
@@ -422,7 +436,9 @@
 
         function executeMove(move) {
             let type = boardState[move.fromR][move.fromC];
+            let executedCapture = move.capture !== null;
             
+            // Promoção para dama no fim do movimento simples ou do combo
             if (type === 1 && move.toR === 0) type = 3;
             if (type === 2 && move.toR === 7) type = 4;
 
@@ -435,18 +451,42 @@
                 boardState[move.capture.r][move.capture.c] = 0;
             }
 
-            selectedPiece = null;
-            validMoves = [];
-            
             if (checkGameOver()) return;
 
+            // Lógica de Captura Múltipla (Combo)
+            if (executedCapture) {
+                // Procura se a peça que acabou de mover tem mais capturas disponíveis
+                let consecutiveCaptures = getMovesForPiece(move.toR, move.toC).filter(m => m.capture !== null);
+                
+                if (consecutiveCaptures.length > 0) {
+                    isMultiCaptureChain = true;
+                    selectedPiece = { row: move.toR, col: move.toC };
+                    
+                    if (playerTurn) {
+                        // Mantém o turno do jogador e destaca a próxima captura obrigatória automaticamente
+                        validMoves = consecutiveCaptures;
+                        drawBoard();
+                        return; 
+                    } else {
+                        // Se for a CPU combando, ela joga novamente após uma pequena pausa
+                        validMoves = [];
+                        drawBoard();
+                        setTimeout(() => cpuPlayNextChain(move.toR, move.toC), 800);
+                        return;
+                    }
+                }
+            }
+
+            // Se não houver mais capturas na sequência, finaliza o turno normalmente
+            isMultiCaptureChain = false;
+            selectedPiece = null;
+            validMoves = [];
             playerTurn = !playerTurn;
             drawBoard();
 
             if (!playerTurn) {
                 setTimeout(cpuPlay, 800);
             } else {
-                // Checa travamentos do jogador humano para validar empates
                 checkPlayerTurnMoves();
             }
         }
@@ -476,14 +516,13 @@
                 }
             }
 
-            // Condição de Empate se a CPU estiver com peças vivas mas sem movimentação disponível
             if (allMoves.length === 0 && cpuCount > 0) {
                 alert("Jogo Encerrado! O adversário não possui movimentos válidos. EMPATE!");
                 resetToMenu();
                 return;
             }
 
-            // SISTEMA HEURÍSTICO DE PESOS PARA IA INTELIGENTE
+            // IA Inteligente Heurística
             allMoves.forEach(move => {
                 let score = 0;
                 let isKing = boardState[move.fromR][move.fromC] === 4;
@@ -491,6 +530,10 @@
                 if (move.capture !== null) {
                     score += 100;
                     if (boardState[move.capture.r][move.capture.c] === 3) score += 30;
+                    
+                    // Bônus heurístico massivo se a jogada iniciar um combo de capturas
+                    let simulationState = getMovesForPiece(move.toR, move.toC).filter(m => m.capture !== null);
+                    if (simulationState.length > 0) score += 80; 
                 }
 
                 if (!isKing && move.toR === 7) score += 50;
@@ -520,6 +563,16 @@
             executeMove(chosenMove);
         }
 
+        // Executa especificamente a continuação do combo da CPU
+        function cpuPlayNextChain(r, c) {
+            let consecutiveCaptures = getMovesForPiece(r, c).filter(m => m.capture !== null);
+            if(consecutiveCaptures.length > 0) {
+                // Se houver mais de um caminho no combo, escolhe um aleatório
+                let chosenMove = consecutiveCaptures[Math.floor(Math.random() * consecutiveCaptures.length)];
+                executeMove(chosenMove);
+            }
+        }
+
         function checkGameOver() {
             if (pCount === 0) { alert("Fim de Jogo! A CPU venceu."); resetToMenu(); return true; }
             if (cpuCount === 0) { alert("Parabéns! Você derrotou o adversário."); resetToMenu(); return true; }
@@ -531,6 +584,7 @@
             setupScreen.style.display = 'block';
             validMoves = [];
             selectedPiece = null;
+            isMultiCaptureChain = false;
         }
 
         document.getElementById('btn-start').addEventListener('click', () => {
